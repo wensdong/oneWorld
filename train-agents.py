@@ -7,17 +7,14 @@ import gym
 import time, tqdm
 from gym.envs.box2d.car_dynamics import Car
 from gym.envs.box2d import CarRacing
-
 import cma
 import multiprocessing as mp
-
 from train_VAE import load_vae
-
 _z_size = 32
 _h_size =256
 _num_pred = 2
-_num_as = 3
-_num_param = _num_pred * _z_size + _num_pred
+_a_size = 3
+_num_param = _num_pred * (_z_size + _h_size) + _num_pred
 
 def normalize_obs(obs):
 	return obs.astype('float32') / 255.
@@ -25,17 +22,15 @@ def normalize_obs(obs):
 def get_weights_bias(params):
 	weights = params[:_num_param - _num_pred]
 	bias = params[-_num_pred:]
-	weights = np.reshape(weights, [_z_size, _num_pred])
+	weights = np.reshape(weights, [(_z_size + _h_size), _num_pred])
 	return weights, bias
 
-def vae_
-
-def decide_a(sess, network, z, h, params):
+def decide_a(z, h, params):
 	weights, bias = get_weights_bias(params)
-	a = np.zeros(_num_as)
+	a = np.zeros(_a_size)
 
 	#add rnn hidden to the equation
-	pred = np.matmul(np.squeeze(z +h ), weights) + bias
+	pred = np.matmul(concatenate(np.squeeze(z), h), weights) + bias
 	pred = np.tanh(pred)
 
 	a[0] = pred[0]
@@ -48,8 +43,7 @@ def decide_a(sess, network, z, h, params):
 
 	return a
 
-def rnn(z, a, h)
-	return 
+
 '''
 def rollout(controller):
 ’’’ env, rnn, vae are ’’’
@@ -62,7 +56,7 @@ cumulative_reward = 0
 
 while not done:
 	z = network.encoder(obs)
-	a = decide_a(sess, network, obs, h, params)
+	a = decide_a(obs, h, params)
 	obs, reward, done = env.step(a)
 	cumulative_reward += reward
 	h = rnn.forward([a, z, h])
@@ -70,6 +64,7 @@ return cumulative_reward
 '''
 
 env = CarRacing()
+
 
 def rollout(params, render=True, verbose=False):
 	sess, network = load_vae()
@@ -87,16 +82,16 @@ def rollout(params, render=True, verbose=False):
 		cumulative_reward = 0.0
 		steps = 0
 		done = False
-		h = np.zeros(256)
-		W = np.random(256, 291)
+		h = np.zeros(_h_size)
 
 		#rollout
-		for steps in range(1000)
+		for steps in range(1000):
 			if render:
 				env.render()
 			obs = normalize_obs(obs)
 			z = sess.run(network.z, feed_dict={network.image: obs[None, :,  :,  :]})			
-			a = decide_a(sess, network, z, h, params)
+			a = decide_a(z, h, params)
+
 			# generate step reward
 			obs, r, done, info = env.step(a)
 			cumulative_reward += r
@@ -108,8 +103,13 @@ def rollout(params, render=True, verbose=False):
 				print("step {} cumulative_reward {:+0.2f}".format(steps, cumulative_reward))
 
 			# add hidden
+			lstm_input = Input(shape=(_a_size + _z_size + _h_size,), dtype='int32', name='lstm_input')
+			lstm_out = LSTM(_h_size)(lstm_input)
 
-			h = np.matmul( W,  np.concatenate(a, z, h))
+			model = Model(inputs=[lstm_input], outputs=[lstm_out])
+			h = model(keras.layers.concatenate(a, h, z))
+
+
 
 		# If reward is out of scale, clip it
 		cumulative_reward = np.maximum(-100, cumulative_reward)
@@ -122,11 +122,11 @@ def train():
 	generation = 1
 	try:
 		while not es.stop():
-			solutions = es.ask()
+			params = es.ask()
 			with mp.Pool(mp.cpu_count()) as p:
-				rewards = list(tqdm.tqdm(p.imap(rollout, list(solutions)), total=len(solutions)))
+				rewards = list(tqdm.tqdm(p.imap(rollout, list(params)), total=len(params)))
 
-			es.tell(solutions, rewards)
+			es.tell(params, rewards)
 
 			rewards = np.array(rewards) *(-1.)
 			print("\n**************")
