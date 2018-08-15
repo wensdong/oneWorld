@@ -10,6 +10,10 @@ from gym.envs.box2d import CarRacing
 import cma
 import multiprocessing as mp
 from train_VAE import load_vae
+
+from keras.layers import Input, Dense
+from keras.models import Model
+from keras.layers import Input, Embedding, LSTM, Dense
 _z_size = 32
 _h_size =256
 _num_pred = 2
@@ -30,7 +34,7 @@ def decide_a(z, h, params):
 	a = np.zeros(_a_size)
 
 	#add rnn hidden to the equation
-	pred = np.matmul(concatenate(np.squeeze(z), h), weights) + bias
+	pred = np.matmul(np.concatenate((np.squeeze(z), h), axis =0), weights) + bias
 	pred = np.tanh(pred)
 
 	a[0] = pred[0]
@@ -68,7 +72,7 @@ env = CarRacing()
 
 def rollout(params, render=True, verbose=False):
 	sess, network = load_vae()
-	_num_trials = 12
+	_num_trials = 1
 	agent_reward = 0
 	for trial in range(_num_trials):
 		obs = env.reset()
@@ -86,29 +90,35 @@ def rollout(params, render=True, verbose=False):
 
 		#rollout
 		for steps in range(1000):
+			
 			if render:
 				env.render()
 			obs = normalize_obs(obs)
 			z = sess.run(network.z, feed_dict={network.image: obs[None, :,  :,  :]})			
 			a = decide_a(z, h, params)
+			print(a)
 
 			# generate step reward
 			obs, r, done, info = env.step(a)
 			cumulative_reward += r
-
+			print(r)
+			
 			# NB: done is not True after 1000 steps when using the hack above for
 			# 	  random init of position
 			if verbose and (steps % 200 == 0 or steps == 999):
 				print("\na " + str(["{:+0.2f}".format(x) for x in a]))
 				print("step {} cumulative_reward {:+0.2f}".format(steps, cumulative_reward))
 
+			
+			
 			# add hidden
-			lstm_input = Input(shape=(_a_size + _z_size + _h_size,), dtype='int32', name='lstm_input')
+			lstm_input = Input(shape=(_a_size + _z_size + _h_size), dtype='int32', name='lstm_input')
+
 			lstm_out = LSTM(_h_size)(lstm_input)
 
 			model = Model(inputs=[lstm_input], outputs=[lstm_out])
 			h = model(keras.layers.concatenate(a, h, z))
-
+			
 
 
 		# If reward is out of scale, clip it
@@ -117,7 +127,7 @@ def rollout(params, render=True, verbose=False):
 	return - (agent_reward / _num_trials)
 
 def train():
-	es = cma.CMAEvolutionStrategy(_num_param * [0], 0.1, {'popsize': 16})
+	es = cma.CMAEvolutionStrategy(_num_param * [0], 0.1, {'popsize': 4})
 	rewards_through_gens = []
 	generation = 1
 	try:
