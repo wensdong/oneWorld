@@ -1,7 +1,6 @@
 """
 Game is solved when agent consistently gets 900+ points. Track is random every episode.
 """
-
 import numpy as np
 import gym
 import time, tqdm
@@ -14,6 +13,9 @@ from train_VAE import load_vae
 from keras.layers import Input, Dense
 from keras.models import Model
 from keras.layers import Input, Embedding, LSTM, Dense
+from keras.preprocessing import sequence
+from keras.models import Sequential
+import keras
 _z_size = 32
 _h_size =256
 _num_pred = 2
@@ -46,8 +48,6 @@ def decide_a(z, h, params):
 		a[1] = 0
 
 	return a
-
-
 '''
 def rollout(controller):
 ’’’ env, rnn, vae are ’’’
@@ -66,10 +66,7 @@ while not done:
 	h = rnn.forward([a, z, h])
 return cumulative_reward
 '''
-
 env = CarRacing()
-
-
 def rollout(params, render=True, verbose=False):
 	sess, network = load_vae()
 	_num_trials = 1
@@ -86,7 +83,8 @@ def rollout(params, render=True, verbose=False):
 		cumulative_reward = 0.0
 		steps = 0
 		done = False
-		h = np.zeros(_h_size)
+		h = np.zeros(_h_size,)
+		print('h shape',h.shape)
 
 		#rollout
 		for steps in range(1000):
@@ -94,9 +92,11 @@ def rollout(params, render=True, verbose=False):
 			if render:
 				env.render()
 			obs = normalize_obs(obs)
-			z = sess.run(network.z, feed_dict={network.image: obs[None, :,  :,  :]})			
+			z = sess.run(network.z, feed_dict={network.image: obs[None, :,  :,  :]})	
+			print('z shape', z.shape)
+			print(' z squeeze shape',np.squeeze(z).shape)		
 			a = decide_a(z, h, params)
-			print(a)
+			print('a shape', a.shape)
 
 			# generate step reward
 			obs, r, done, info = env.step(a)
@@ -108,18 +108,18 @@ def rollout(params, render=True, verbose=False):
 			if verbose and (steps % 200 == 0 or steps == 999):
 				print("\na " + str(["{:+0.2f}".format(x) for x in a]))
 				print("step {} cumulative_reward {:+0.2f}".format(steps, cumulative_reward))
+			print("i am here")
 
-			
-			
 			# add hidden
-			lstm_input = Input(shape=(_a_size + _z_size + _h_size), dtype='int32', name='lstm_input')
-
-			lstm_out = LSTM(_h_size)(lstm_input)
-
-			model = Model(inputs=[lstm_input], outputs=[lstm_out])
-			h = model(keras.layers.concatenate(a, h, z))
-			
-
+			print('Build model...')
+			model = Sequential()
+			input = Input(shape=(_a_size + _z_size + _h_size,), dtype='int32', name='input')
+			model.add(LSTM(_h_size, dropout=0.2, recurrent_dropout=0.2))			
+			print('predicting...')
+			z = np.squeeze(z)
+			x = keras.layers.concatenate()([a, h, z])
+			h = model.predict(x)
+			print('print h', h)
 
 		# If reward is out of scale, clip it
 		cumulative_reward = np.maximum(-100, cumulative_reward)
